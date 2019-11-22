@@ -5,11 +5,20 @@
 #include <unistd.h>
 #include <fcntl.h>
 
+ __aligned(8192)
 void
 thumb_mcr(void)
 {
-	asm(".align 13");
 	asm(".rept 4095; nop; .endr");
 	asm("mcr p15, 0, r0, c7, c5, 4");
+	asm(".rept 4095; nop; .endr");
+}
+
+__aligned(8192)
+void
+thumb_ill(void)
+{
+	asm(".rept 4095; nop; .endr");
+	asm(".byte 0xb7,0xb7,0xb7,0xb7");	// 16bit Illegal instruction * 2
 	asm(".rept 4095; nop; .endr");
 }
