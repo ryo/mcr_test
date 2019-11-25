@@ -5,6 +5,7 @@
 #include <sys/mman.h>
 
 void thumb_mcr(void);
+void thumb_nop(void);
 void thumb_ill(void);
 
 static void
@@ -34,8 +35,11 @@ void
 usage(void)
 {
 	fprintf(stderr, "mcr_test <test>\n");
-	fprintf(stderr, "	mcr	execute \"mcr p15, 0, r0, c7, c5, 4\" on page boundary (mapped and unmapped)\n");
-	fprintf(stderr, "	ill	execute \".insn 0xb7b7\" on page boundary (mapped and unmapped)\n");
+	fprintf(stderr, "	mcr		execute \"mcr p15, 0, r0, c7, c5, 4\" on arm and thumb mode\n");
+	fprintf(stderr, "	mcr_pageout	execute \"mcr p15, 0, r0, c7, c5, 4\" on page boundary (mapped and pageout'ed)\n");
+	fprintf(stderr, "	mcr_unmap	execute \"mcr p15, 0, r0, c7, c5, 4\" on page boundary (mapped and unmapped)\n");
+	fprintf(stderr, "	nop_pageout	execute \"nop.w\" on page boundary (mapped and pageout'ed)\n");
+	fprintf(stderr, "	ill		execute \".insn 0xb7b7\" on page boundary (mapped and unmapped)\n");
 	exit(1);
 }
 
@@ -46,6 +50,7 @@ main(int argc, char *argv[])
 	int pagesize = 8192;
 	uint32_t *insn;
 	void *thumb_mcr_addr;
+	void *thumb_nop_addr;
 	void *thumb_ill_addr;
 
 	if (argc != 2)
@@ -56,17 +61,20 @@ main(int argc, char *argv[])
 	printf("pagesize=%d\n", pagesize);
 
 
-	printf("do mcr insn on 32bit\n");
-	asm("mcr p15, 0, r0, c7, c5, 4");
-	printf("ok\n\n");
-
-
-	printf("do mcr insn on thumbmode\n");
-	thumb_mcr();
-	printf("ok\n\n");
-
-
 	if (strcmp(argv[1], "mcr") == 0) {
+		printf("do mcr insn on 32bit\n");
+		asm("mcr p15, 0, r0, c7, c5, 4");
+		printf("ok\n\n");
+
+		printf("do mcr insn on thumbmode\n");
+		thumb_mcr();
+		printf("ok\n\n");
+	}
+
+
+	if (strcmp(argv[1], "mcr_unmap") == 0 ||
+	    strcmp(argv[1], "mcr_pageout") == 0) {
+
 		thumb_mcr_addr = (void *)((uintptr_t)thumb_mcr & -2);
 
 		/* dump around page boundary */
@@ -74,16 +82,53 @@ main(int argc, char *argv[])
 		dumpstr(thumb_mcr_addr + pagesize - 32, 64);
 		printf("\n");
 
-		/* unmap page (last half of thumb_mcr()) */
-		printf("munmap page %p-%p", thumb_mcr_addr + pagesize, thumb_mcr_addr + pagesize * 2);
-		rc = munmap(thumb_mcr_addr + pagesize, pagesize);
-		printf(" -> %d\n\n", rc);
+		if (strcmp(argv[1], "mcr_unmap") == 0) {
+			/* unmap page (last half of thumb_mcr()) */
+			printf("munmap page %p-%p", thumb_mcr_addr + pagesize, thumb_mcr_addr + pagesize * 2 - 1);
+			rc = munmap(thumb_mcr_addr + pagesize, pagesize);
+			printf(" -> %d\n\n", rc);
+		}
 
-		/* SEGV */
-		printf("mcr on thumbmode on unmapped page boundary\n");
+		if (strcmp(argv[1], "mcr_pageout") == 0) {
+			/* unmap page (last half of thumb_mcr()) */
+			printf("pageout %p-%p", thumb_mcr_addr + pagesize, thumb_mcr_addr + pagesize * 2 - 1);
+			rc = madvise(thumb_mcr_addr + pagesize, pagesize, MADV_DONTNEED);
+			printf(" -> %d", rc);
+			rc = madvise(thumb_mcr_addr + pagesize, pagesize, MADV_FREE);
+			printf(",%d\n\n", rc);
+			getpid();	/* XXX: any syscall(scheduling) needed to apply? */
+		}
+
+		/* segv or pagein->ok */
+		printf("mcr on thumbmode on unmapped(pageout'ed) page boundary\n");
 		thumb_mcr();
 		printf("ok\n\n");
 	}
+
+
+	if (strcmp(argv[1], "nop_pageout") == 0) {
+		thumb_nop_addr = (void *)((uintptr_t)thumb_nop & -2);
+
+		/* dump around page boundary */
+		printf("thumb_nop_addr=%p\n", thumb_nop_addr);
+		dumpstr(thumb_nop_addr + pagesize - 32, 64);
+		printf("\n");
+
+		/* pageout page (last half of thumb_nop()) */
+		printf("pageout %p-%p", thumb_nop_addr + pagesize, thumb_nop_addr + pagesize * 2 - 1);
+
+		rc = madvise(thumb_nop_addr + pagesize, pagesize, MADV_DONTNEED);
+		printf(" -> %d", rc);
+		rc = madvise(thumb_nop_addr + pagesize, pagesize, MADV_FREE);
+		printf(",%d\n\n", rc);
+		getpid();	/* XXX: any syscall(scheduling) needed to apply? */
+
+		/* pagein->ok */
+		printf("nop on thumbmode on pageout'ed page boundary\n");
+		thumb_nop();
+		printf("ok\n\n");
+	}
+
 
 	if (strcmp(argv[1], "ill") == 0) {
 		thumb_ill_addr = (void *)((uintptr_t)thumb_ill & -2);
@@ -94,7 +139,7 @@ main(int argc, char *argv[])
 		printf("\n");
 
 		/* unmap page (last half of thumb_ill()) */
-		printf("munmap page %p-%p", thumb_ill_addr + pagesize, thumb_ill_addr + pagesize * 2);
+		printf("munmap page %p-%p", thumb_ill_addr + pagesize, thumb_ill_addr + pagesize * 2 - 1);
 		rc = munmap(thumb_ill_addr + pagesize, pagesize);
 		printf(" -> %d\n\n", rc);
 

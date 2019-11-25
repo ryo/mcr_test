@@ -14,6 +14,15 @@ thumb_mcr(void)
 	asm(".rept 4095; nop; .endr");
 }
 
+ __aligned(8192)
+void
+thumb_nop(void)
+{
+	asm(".rept 4095; nop; .endr");
+	asm("nop.w");
+	asm(".rept 4095; nop; .endr");
+}
+
 __aligned(8192)
 void
 thumb_ill(void)
